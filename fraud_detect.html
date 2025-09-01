@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>MP Police Cyber Cell - Anti-Fraud Dashboard (Standalone)</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+:root{
+  --bg:#0f1118; --card:#141725; --muted:#9aa0b3; --accent-red:#ff004c; --accent-green:#00d293;
+  --border:#2b2f48;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Segoe UI,Roboto,Arial;background:var(--bg);color:#eef2ff}
+.header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:var(--card);box-shadow:0 3px 8px rgba(0,0,0,0.6)}
+.logo{display:flex;gap:12px;align-items:center;font-weight:700}
+.container{display:flex;min-height:calc(100vh - 64px)}
+.sidebar{width:260px;background:var(--card);padding:18px;border-right:1px solid var(--border)}
+.sidebar ul{list-style:none;padding:0;margin:0}
+.sidebar li{padding:10px 12px;border-radius:8px;margin-bottom:8px;cursor:pointer}
+.sidebar li.active, .sidebar li:hover{background:#23263a}
+.main{flex:1;padding:18px;display:grid;grid-template-columns:2fr 1fr;gap:18px; grid-template-rows: auto 1fr auto}
+.metrics{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.card{background:linear-gradient(180deg,var(--card),#0f1220);padding:14px;border-radius:10px;border:1px solid var(--border);box-shadow:0 6px 16px rgba(0,0,0,0.5)}
+.metric h2{margin:6px 0 0;font-size:1.6rem}
+#fraud-network{height:420px;border-radius:8px;overflow:hidden;background:linear-gradient(180deg,#071024,#0a1326)}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.controls label{color:var(--muted);margin-right:6px}
+input[type="date"], select, input[type="number"]{background:#0c1020;padding:8px;border-radius:6px;border:1px solid var(--border);color:#e6eef8}
+.table-wrap{max-height:350px;overflow:auto;margin-top:12px}
+table{width:100%;border-collapse:collapse;color:#e9eefb;font-size:0.95rem}
+th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left}
+th{position:sticky;top:0;background:#0b0e1a}
+.badge-fraud{color:var(--accent-red);font-weight:700}
+.badge-normal{color:var(--accent-green);font-weight:700}
+.btn{background:var(--accent-red);color:white;padding:8px 12px;border-radius:6px;border:none;cursor:pointer}
+.small{font-size:0.85rem;color:var(--muted)}
+.side-profile img{width:70px;height:70px;border-radius:50%;border:2px solid var(--border)}
+.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hop-list{list-style:none;padding:0;margin:0}
+.highlight{box-shadow:0 0 12px rgba(255,0,76,0.25)}
+.progress{height:8px;background:#0b0e1a;border-radius:6px;margin-top:8px;overflow:hidden}
+.progress > div{height:100%;width:0;background:linear-gradient(90deg,var(--accent-green),#6ef0c6)}
+.footer-note{font-size:0.85rem;color:var(--muted);margin-top:8px}
+
+.content-section {
+  display: none;
+}
+.content-section.active {
+  display: block;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">MP Police Cyber Cell</div>
+  <div id="user-area"></div>
+</div>
+
+<div class="container">
+  <aside class="sidebar">
+    <ul>
+      <li id="tab-overview" class="active">Overview</li>
+      <li id="tab-graph-view">Graph View</li>
+      <li id="tab-suspicious-cases">Suspicious Cases</li>
+      <li id="tab-reports">Reports</li>
+    </ul>
+
+    <div style="margin-top:18px">
+      <div class="small">Quick Filters</div>
+      <div style="margin-top:8px" class="filters">
+        <select id="quick-risk">
+          <option value="all">All risks</option>
+          <option value="high">High risk (>=70%)</option>
+          <option value="medium">Medium (40-69%)</option>
+          <option value="low">Low (&lt;40%)</option>
+        </select>
+        <button class="btn" id="play-sim"> Simulate Flow</button>
+      </div>
+    </div>
+
+    <div style="margin-top:18px" class="card">
+      <div class="small">Hop Detection</div>
+      <ul id="hop-list" class="hop-list" style="margin-top:10px"></ul>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="metrics">
+      <div class="card metric">
+        <div class="small">Total Accounts Monitored</div>
+        <h2 id="m-accounts">0</h2>
+      </div>
+      <div class="card metric">
+        <div class="small">Total Transactions</div>
+        <h2 id="m-trans">0</h2>
+      </div>
+      <div class="card metric">
+        <div class="small">Fraudulent Transactions Detected</div>
+        <h2 id="m-fraud">0</h2>
+      </div>
+      <div class="card metric">
+        <div class="small">Suspicious Accounts Under Review</div>
+        <h2 id="m-susp">0</h2>
+      </div>
+    </div>
+
+    <div id="overview-content" class="content-section active">
+      <section class="card" style="grid-column:1/2">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Fraud Network</h3>
+          <div class="small">Click nodes/edges to investigate</div>
+        </div>
+        <div id="fraud-network"></div>
+      </section>
+
+      <section class="card side-profile" style="grid-column:2/3">
+        <h3 style="margin:0">Case Investigation</h3>
+        <div style="display:flex;gap:12px;align-items:center;margin-top:12px">
+          <img id="profile-pic" src="https://i.pravatar.cc/150?img=64" alt="profile">
+          <div>
+            <div><b id="invest-owner">Select an account</b></div>
+            <div class="small" id="invest-occupation">Owner: N/A</div>
+            <div class="small" id="invest-linked">Linked Accounts: 0</div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <div class="small">Transaction Timeline</div>
+          <canvas id="timeline" height="140" style="margin-top:6px"></canvas>
+        </div>
+
+        <div style="margin-top:12px">
+          <div class="small">Fraud Flags Triggered</div>
+          <ul id="flag-list" style="margin-top:8px"></ul>
+        </div>
+      </section>
+
+      <section class="card table-card" style="grid-column:1/3">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3>Live Transaction Data</h3>
+          <div>
+            <button class="btn" id="generate-data">Generate Data</button>
+          </div>
+        </div>
+
+        <div class="controls" style="margin-top:10px">
+          <label>From: <input type="date" id="f-from"></label>
+          <label>To: <input type="date" id="f-to"></label>
+          <label>Type:
+            <select id="f-type">
+              <option value="all">All</option><option>Debit</option><option>Credit</option><option>Transfer</option>
+            </select>
+          </label>
+          <label>Amount min: <input type="number" id="f-amt-min" placeholder="0"></label>
+          <label>max: <input type="number" id="f-amt-max" placeholder="9999999"></label>
+          <label>Sort by:
+            <select id="f-sort">
+              <option value="risk">Risk desc</option>
+              <option value="amount">Amount desc</option>
+              <option value="time">Time desc</option>
+            </select>
+          </label>
+          <button class="btn" id="apply-filters">Apply</button>
+          <button class="btn" id="reset-filters">Reset</button>
+          <button class="btn" id="export-pdf">Export PDF</button>
+        </div>
+
+        <div class="progress" id="load-progress" style="display:none"><div></div></div>
+
+        <div class="table-wrap">
+          <table id="txn-table">
+            <thead><tr><th>TxnID</th><th>Time</th><th>Source</th><th>Destination</th><th>Amount</th><th>Type</th><th>Risk</th><th>Flag</th></tr></thead>
+            <tbody id="txn-body"></tbody>
+          </table>
+        </div>
+
+        <div class="footer-note">Tip: Use quick-risk filter to highlight probable fraud; graph edges show Txn details on click.</div>
+      </section>
+    </div>
+
+    <div id="graph-view-content" class="content-section">
+      <section class="card" style="grid-column:1/3">
+        <h3 style="margin:0">Full Fraud Network View</h3>
+        <div id="full-fraud-network" style="height: 600px; border-radius: 8px; margin-top: 10px; background: linear-gradient(180deg,#071024,#0a1326);"></div>
+        <div class="small" style="margin-top: 10px; color: var(--muted);">Click nodes to see details. This is a dedicated view of the network.</div>
+      </section>
+    </div>
+    
+    <div id="suspicious-cases-content" class="content-section">
+        <section class="card" style="grid-column:1/3">
+            <h3>Suspicious Cases</h3>
+            <p class="small">Filtering for transactions with a risk score of 40% or higher.</p>
+            <div class="table-wrap">
+                <table id="suspicious-txn-table">
+                    <thead><tr><th>TxnID</th><th>Time</th><th>Source</th><th>Destination</th><th>Amount</th><th>Type</th><th>Risk</th><th>Flag</th></tr></thead>
+                    <tbody id="suspicious-txn-body"></tbody>
+                </table>
+            </div>
+            <div class="footer-note">Note: This section automatically filters all transactions by risk score.</div>
+        </section>
+    </div>
+
+    <div id="reports-content" class="content-section">
+        <section class="card" style="grid-column:1/3">
+            <h3>Generate Reports</h3>
+            <p class="small">Create a PDF report of your current filtered data.</p>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:12px;">
+                <label>Report Title: <input type="text" id="report-title" placeholder="e.g., Q3 Fraud Report"></label>
+                <button class="btn" id="generate-report-btn">Generate Report</button>
+            </div>
+        </section>
+    </div>
+
+  </main>
+</div>
+
+<div id="login-modal" class="login-modal" style="display:none">
+  <div class="login-card">
+    <h3>Officer Login</h3>
+    <div style="margin-top:8px"><input id="login-user" placeholder="Username" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:#071026;color:white"></div>
+    <div style="margin-top:8px"><input id="login-pass" type="password" placeholder="Password" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:#071026;color:white"></div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn" id="login-btn">Login</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let transactions = [];
+let filtered = [];
+let network = null;
+let networkData = { nodes: null, edges: null };
+let timelineChart = null;
+let fullNetwork = null;
+const state = { playInterval: null };
+
+function showTab(tabId) {
+    document.querySelectorAll('.sidebar li').forEach(li => li.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+
+    document.querySelectorAll('.content-section').forEach(section => section.classList.remove('active'));
+    document.getElementById(tabId.replace('tab-', '') + '-content').classList.add('active');
+    
+    if(tabId === 'tab-graph-view') {
+        updateGraph();
+    }
+    if(tabId === 'tab-suspicious-cases') {
+        renderSuspiciousCasesTable();
+    }
+    if(tabId === 'tab-overview'){
+        updateGraph();
+    }
+}
+
+function scoreRisk(tx){
+  const amt = Number(tx.Amount || 0);
+  let r = 5;
+  if(amt >= 10000) r += 70;
+  else if(amt >= 5000) r += 45;
+  else if(amt >= 1000) r += 20;
+  if(tx.Timestamp){
+    const hr = new Date(tx.Timestamp).getHours();
+    if(hr <= 5) r += 10;
+  }
+  if(tx.Type && tx.Type.toLowerCase().includes('transfer')) r += 8;
+  return Math.max(0, Math.min(100, Math.round(r)));
+}
+function flagFromRisk(r){ return r>=70 ? 'Fraud' : r>=40 ? 'Suspicious' : 'Normal' }
+
+const txnBody = document.getElementById('txn-body');
+const mAccounts = document.getElementById('m-accounts');
+const mTrans = document.getElementById('m-trans');
+const mFraud = document.getElementById('m-fraud');
+const mSusp = document.getElementById('m-susp');
+const hopListEl = document.getElementById('hop-list');
+const fFrom = document.getElementById('f-from');
+const fTo = document.getElementById('f-to');
+const fType = document.getElementById('f-type');
+const fAmtMin = document.getElementById('f-amt-min');
+const fAmtMax = document.getElementById('f-amt-max');
+const quickRiskSelect = document.getElementById('quick-risk');
+
+function generateRandomData() {
+  const accountPrefixes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
+  const dataSize = 100;
+  const newTransactions = [];
+  const now = new Date();
+  const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+
+  const fraudChainAccounts = ['FRAUD1', 'FRAUD2', 'FRAUD3', 'FRAUD4', 'FRAUD5'];
+  for (let i = 0; i < fraudChainAccounts.length - 1; i++) {
+    newTransactions.push({
+      TxnID: `F_CHAIN_${i}`,
+      Timestamp: new Date(now.getTime() - Math.random() * thirtyDays).toISOString(),
+      Source: fraudChainAccounts[i],
+      Destination: fraudChainAccounts[i+1],
+      Amount: 15000 + Math.random() * 5000,
+      Type: 'Transfer'
+    });
+  }
+
+  for (let i = 0; i < dataSize; i++) {
+    const src = accountPrefixes[Math.floor(Math.random() * accountPrefixes.length)] + Math.floor(100 + Math.random() * 900);
+    const dest = accountPrefixes[Math.floor(Math.random() * accountPrefixes.length)] + Math.floor(100 + Math.random() * 900);
+    
+    let amount;
+    const riskGroup = Math.random();
+    if (riskGroup < 0.25) { 
+        amount = 12000 + Math.random() * 10000;
+    } else if (riskGroup < 0.65) { 
+        amount = 1000 + Math.random() * 4000;
+    } else {
+        amount = Math.random() * 999;
+    }
+
+    const type = amount >= 10000 ? 'Transfer' : (Math.random() > 0.5 ? 'Debit' : 'Credit');
+    const timestamp = new Date(now.getTime() - Math.random() * thirtyDays).toISOString();
+
+    newTransactions.push({
+      TxnID: `TXN_${i}`,
+      Timestamp: timestamp,
+      Source: src,
+      Destination: dest,
+      Amount: Math.round(amount),
+      Type: type
+    });
+  }
+
+  transactions = newTransactions.map(t => {
+    t.risk = scoreRisk(t);
+    t.flag = flagFromRisk(t.risk);
+    return t;
+  });
+  
+  // Save to local storage
+  localStorage.setItem('fraudTransactions', JSON.stringify(transactions));
+  
+  resetFilters();
+  applyFilters();
+}
+
+function applyFilters(){
+  const from = fFrom.value;
+  const to = fTo.value;
+  const type = fType.value;
+  const min = Number(fAmtMin.value || 0);
+  const max = Number(fAmtMax.value || 999999999);
+  const sort = document.getElementById('f-sort').value;
+  const quickRisk = quickRiskSelect.value;
+
+  let baseData = [...transactions];
+
+  filtered = baseData.filter(t => {
+    let ok = true;
+    const txnDate = new Date(t.Timestamp);
+    if (from) {
+      const fromDate = new Date(from + 'T00:00:00');
+      ok = ok && (txnDate >= fromDate);
+    }
+    if (to) {
+      const toDate = new Date(to + 'T23:59:59');
+      ok = ok && (txnDate <= toDate);
+    }
+    if (type && type !== 'all') {
+      ok = ok && (String(t.Type || '').toLowerCase() === type.toLowerCase());
+    }
+    ok = ok && (t.Amount >= min && t.Amount <= max);
+    
+    if (quickRisk === 'high') {
+      ok = ok && (t.risk >= 70);
+    } else if (quickRisk === 'medium') {
+      ok = ok && (t.risk >= 40 && t.risk < 70);
+    } else if (quickRisk === 'low') {
+      ok = ok && (t.risk < 40);
+    }
+    return ok;
+  });
+
+  if(sort === 'risk') filtered.sort((a,b)=>b.risk - a.risk);
+  if(sort === 'amount') filtered.sort((a,b)=>b.Amount - a.Amount);
+  if(sort === 'time') filtered.sort((a,b)=> new Date(b.Timestamp) - new Date(a.Timestamp));
+
+  renderTable();
+  updateMetrics();
+  updateGraph();
+  detectHops();
+}
+
+function resetFilters() {
+  fFrom.value = '';
+  fTo.value = '';
+  fType.value = 'all';
+  fAmtMin.value = '';
+  fAmtMax.value = '';
+  document.getElementById('f-sort').value = 'risk';
+  quickRiskSelect.value = 'all';
+  applyFilters();
+}
+
+function renderTable(){
+  const tableBody = document.getElementById('txn-body');
+  if(!tableBody) return;
+  tableBody.innerHTML = '';
+  if (filtered.length === 0) {
+    tableBody.innerHTML = `<td colspan="8" style="text-align:center; color:var(--muted)">No transactions match the criteria. Please adjust filters or generate data.</td>`;
+    return;
+  }
+  filtered.forEach(t=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${t.TxnID}</td>
+      <td>${new Date(t.Timestamp).toLocaleString()}</td>
+      <td>${t.Source}</td>
+      <td>${t.Destination}</td>
+      <td>₹${Number(t.Amount).toLocaleString()}</td>
+      <td>${t.Type||''}</td>
+      <td>${t.risk}%</td>
+      <td><span class="${t.flag==='Fraud' ? 'badge-fraud' : t.flag==='Suspicious' ? 'badge-fraud' : 'badge-normal'}">${t.flag}</span></td>
+    `;
+    tr.addEventListener('click', ()=> { focusOnAccount(t.Source); });
+    tableBody.appendChild(tr);
+  });
+}
+
+function updateMetrics(){
+  const accounts = new Set(transactions.flatMap(t=>[t.Source,t.Destination]).filter(x=>x));
+  mAccounts.textContent = accounts.size;
+  mTrans.textContent = filtered.length;
+  mFraud.textContent = transactions.filter(t=>t.risk>=70).length;
+  mSusp.textContent = Array.from(accounts).length;
+}
+
+function updateGraph(){
+  if(network){ network.destroy(); network = null; }
+  
+  const nodesMap = new Map();
+  const edges = [];
+  filtered.forEach((t, idx)=>{
+    if(!nodesMap.has(t.Source)) nodesMap.set(t.Source, { id: t.Source, label: t.Source, title: t.Source, shape: 'dot', value: 1 });
+    if(!nodesMap.has(t.Destination)) nodesMap.set(t.Destination, { id: t.Destination, label: t.Destination, title: t.Destination, shape: 'dot', value: 1 });
+    edges.push({
+      id: 'e' + t.TxnID + '_' + idx,
+      from: t.Source,
+      to: t.Destination,
+      arrows: 'to',
+      title: `Txn: ${t.TxnID}\n₹${t.Amount}\nRisk: ${t.risk}%`,
+      color: t.risk >= 70 ? { color: '#ff004c' } : t.risk >= 40 ? { color: '#ff8a6b' } : { color: '#00d293' },
+      width: Math.max(1, Math.min(6, Math.round(t.Amount/2000)))
+    });
+  });
+  const nodes = Array.from(nodesMap.values()).map(n=>{
+    const hasHigh = filtered.some(t => (t.Source===n.id || t.Destination===n.id) && t.risk>=70);
+    return { ...n, color: { background: hasHigh ? '#ff6b88' : '#1f6fb6', border: '#111' }, font:{color:'#fff'} };
+  });
+
+  networkData.nodes = new vis.DataSet(nodes);
+  networkData.edges = new vis.DataSet(edges);
+  const container = document.getElementById('fraud-network');
+  const options = {
+    nodes:{shape:'dot',size:18},
+    edges:{smooth:true,hoverWidth:0.5},
+    physics:{stabilization:false, barnesHut:{gravitationalConstant:-20000}},
+    interaction:{hover:true,tooltipDelay:100}
+  };
+  network = new vis.Network(container, networkData, options);
+  network.on('click', params=>{
+    if(params.nodes && params.nodes.length){ onNodeSelect(params.nodes[0]); }
+    if(params.edges && params.edges.length){
+      const e = networkData.edges.get(params.edges[0]);
+      onEdgeSelect(e);
+    }
+  });
+
+  if(fullNetwork){ fullNetwork.destroy(); }
+  const fullGraphContainer = document.getElementById('full-fraud-network');
+  if(fullGraphContainer && networkData.nodes.length > 0) {
+      fullNetwork = new vis.Network(fullGraphContainer, networkData, options);
+  } else if (fullGraphContainer) {
+      fullGraphContainer.innerHTML = '<p style="text-align:center; color:var(--muted); padding-top:200px;">No data to display in the graph.</p>';
+  }
+}
+
+function onNodeSelect(nodeId){
+  const acc = nodeId;
+  document.getElementById('invest-owner').textContent = acc;
+  document.getElementById('invest-occupation').textContent = 'Owner: (unknown)';
+  const linked = new Set();
+  const hist = transactions.filter(t => t.Source === acc || t.Destination === acc).sort((a,b)=> new Date(a.Timestamp) - new Date(b.Timestamp));
+  hist.forEach(h => { if(h.Source !== acc) linked.add(h.Source); if(h.Destination !== acc) linked.add(h.Destination); });
+  document.getElementById('invest-linked').textContent = linked.size;
+  populateTimeline(hist);
+  populateFlags(hist);
+  highlightNode(nodeId);
+}
+
+function onEdgeSelect(edge){
+  if(edge && edge.title){
+    alert(edge.title.replace(/\n/g,'\n'));
+  }
+}
+
+function focusOnAccount(acc){
+  if(!network) return;
+  try{ network.focus(acc, { scale:1.2, animation:{duration:800} }); onNodeSelect(acc);}catch(e){}
+}
+
+function highlightNode(nodeId){
+  if(!network) return;
+  const allNodes = network.body.data.nodes.get();
+  allNodes.forEach(n => {
+    const update = { id: n.id, borderWidth: n.id === nodeId ? 4 : 1 };
+    network.body.data.nodes.update(update);
+  });
+}
+
+function populateTimeline(hist){
+  const ctx = document.getElementById('timeline').getContext('2d');
+  const bins = {};
+  hist.forEach(t => {
+    const d = t.Timestamp ? t.Timestamp.split('T')[0] : (t.Timestamp || '').split(' ')[0];
+    const label = d || 'unknown';
+    bins[label] = (bins[label]||0) + 1;
+  });
+  const labels = Object.keys(bins).slice(-7);
+  const data = labels.map(l => bins[l]);
+  if(timelineChart) timelineChart.destroy();
+  timelineChart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets:[{ label:'Txns', data, backgroundColor:'rgba(54,162,235,0.6)' }]},
+    options:{responsive:false, maintainAspectRatio:true, scales:{y:{beginAtZero:true}}}
+  });
+}
+
+function populateFlags(hist){
+  const fl = document.getElementById('flag-list');
+  fl.innerHTML = '';
+  const reasons = new Set();
+  hist.forEach(t=>{
+    if(t.Amount >= 10000) reasons.add('Rule: Large transaction (>= ₹10,000)');
+    if(t.risk >= 70) reasons.add('Rule: High risk score (>=70%)');
+    if(t.Timestamp){
+      const hr = new Date(t.Timestamp).getHours();
+      if(hr <= 5) reasons.add('Rule: Transaction at odd hour (00:00 - 05:00)');
+    }
+  });
+  if(reasons.size===0){ fl.innerHTML = '<li class="small">No flags</li>'; return; }
+  reasons.forEach(r => { const li = document.createElement('li'); li.className='small'; li.textContent = r; fl.appendChild(li); });
+}
+
+function detectHops(){
+  const adj = new Map();
+  filtered.forEach(t => {
+    if(!adj.has(t.Source)) adj.set(t.Source, []);
+    adj.get(t.Source).push({ to: t.Destination, txn: t });
+  });
+  const chains = [];
+  const nodes = Array.from(adj.keys());
+  nodes.forEach(start=>{
+    const visited = new Set([start]);
+    function dfs(path, depth){
+      if(depth >= 3){ chains.push([...path]); return; }
+      const last = path[path.length-1];
+      const outs = adj.get(last) || [];
+      outs.forEach(o=>{
+        if(!visited.has(o.to)){
+          visited.add(o.to);
+          path.push(o.to);
+          dfs(path, depth+1);
+          path.pop();
+          visited.delete(o.to);
+        }
+      });
+    }
+    dfs([start], 0);
+  });
+
+  hopListEl.innerHTML = '';
+  const uniq = new Set();
+  chains.forEach(c=>{
+    if(c.length>=2){
+      const key = c.join('->');
+      if(!uniq.has(key) && c.length >= 4){
+        uniq.add(key);
+        const li = document.createElement('li');
+        li.className='small';
+        li.textContent = key;
+        li.style.cursor = 'pointer';
+        li.onclick = ()=> highlightChain(c);
+        hopListEl.appendChild(li);
+      }
+    }
+  });
+  if(uniq.size===0) hopListEl.innerHTML = '<li class="small">No multi-hop chains detected</li>';
+}
+
+function highlightChain(chain){
+  if(!network) return;
+  const allEdges = network.body.data.edges.get();
+  const updates = [];
+  for(let i=0;i<chain.length-1;i++){
+    const from = chain[i], to = chain[i+1];
+    const e = allEdges.find(ed => ed.from===from && ed.to===to);
+    if(e) updates.push({ id: e.id, color: { color: '#ff004c' }, width: 6 });
+  }
+  network.body.data.edges.update(updates);
+  focusOnAccount(chain[0]);
+}
+
+document.getElementById('export-pdf').addEventListener('click', ()=> {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const reportTitle = document.getElementById('report-title').value || 'Filtered Transactions Report';
+  doc.setFontSize(14);
+  doc.text('MP Police Cyber Cell - ' + reportTitle, 14, 18);
+  
+  const dataForPdf = filtered.slice(0,200).map(t => [
+      t.TxnID,
+      new Date(t.Timestamp).toLocaleString(),
+      t.Source,
+      t.Destination,
+      '₹' + Number(t.Amount).toLocaleString(),
+      t.Type || '',
+      t.risk + '%',
+      t.flag
+  ]);
+  
+  doc.autoTable({
+      head: [['TxnID', 'Time', 'Source', 'Destination', 'Amount', 'Type', 'Risk', 'Flag']],
+      body: dataForPdf,
+      startY: 28
+  });
+  
+  doc.save('filtered_transactions.pdf');
+});
+
+document.getElementById('play-sim').onclick = () => {
+  if (transactions.length === 0) {
+    alert("Please generate data first by clicking the 'Generate Data' button.");
+    return;
+  }
+  if(state.playInterval){ clearInterval(state.playInterval); state.playInterval = null; document.getElementById('play-sim').textContent = ' Simulate Flow'; return; }
+  const edgesArr = network ? Object.values(network.body.data.edges._data) : [];
+  let i = 0;
+  state.playInterval = setInterval(()=>{
+    if(!network) return;
+    const e = edgesArr[i % edgesArr.length];
+    if(e){
+      network.body.data.edges.update({ id:e.id, color:{ color:'#ffd36b' }, width:8 });
+      setTimeout(()=> {
+        const orig = filtered.find(t=>t.Source===e.from && t.Destination===e.to);
+        if (orig) {
+            network.body.data.edges.update({ id:e.id, color: orig.risk>=70 ? {color:'#ff004c'} : orig.risk>=40 ? {color:'#ff8a6b'} : {color:'#00d293'}, width: Math.max(1, Math.min(6, Math.round(orig.Amount/2000))) });
+        }
+      },700);
+    }
+    i++;
+  },900);
+  document.getElementById('play-sim').textContent = ' Stop Simulation';
+};
+
+document.getElementById('apply-filters').onclick = applyFilters;
+document.getElementById('generate-data').onclick = generateRandomData;
+document.getElementById('reset-filters').onclick = () => {
+    localStorage.removeItem('fraudTransactions');
+    transactions = [];
+    resetFilters();
+    generateRandomData();
+};
+document.getElementById('quick-risk').onchange = applyFilters; 
+
+function renderSuspiciousCasesTable(){
+    const tableBody = document.getElementById('suspicious-txn-body');
+    if(!tableBody) return;
+    const suspiciousFiltered = transactions.filter(t => t.risk >= 40);
+    if(suspiciousFiltered.length === 0){
+      tableBody.innerHTML = `<td colspan="8" style="text-align:center; color:var(--muted)">No suspicious transactions found in the filtered data.</td>`;
+    } else {
+      tableBody.innerHTML = '';
+      suspiciousFiltered.forEach(t => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+              <td>${t.TxnID}</td>
+              <td>${new Date(t.Timestamp).toLocaleString()}</td>
+              <td>${t.Source}</td>
+              <td>${t.Destination}</td>
+              <td>₹${Number(t.Amount).toLocaleString()}</td>
+              <td>${t.Type||''}</td>
+              <td>${t.risk}%</td>
+              <td><span class="${t.flag==='Fraud' ? 'badge-fraud' : 'badge-normal'}">${t.flag}</span></td>
+          `;
+          tableBody.appendChild(tr);
+      });
+    }
+}
+
+document.getElementById('tab-overview').addEventListener('click', () => {
+    showTab('tab-overview');
+    applyFilters();
+});
+document.getElementById('tab-graph-view').addEventListener('click', () => { 
+    showTab('tab-graph-view'); 
+    updateGraph(); 
+});
+document.getElementById('tab-suspicious-cases').addEventListener('click', () => { 
+    showTab('tab-suspicious-cases'); 
+    renderSuspiciousCasesTable();
+});
+document.getElementById('tab-reports').addEventListener('click', () => { 
+    showTab('tab-reports');
+});
+document.getElementById('generate-report-btn').addEventListener('click', () => {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const reportTitle = document.getElementById('report-title').value || 'Filtered Transactions Report';
+  doc.setFontSize(14);
+  doc.text('MP Police Cyber Cell - ' + reportTitle, 14, 18);
+  
+  const dataForPdf = filtered.slice(0,200).map(t => [
+      t.TxnID,
+      new Date(t.Timestamp).toLocaleString(),
+      t.Source,
+      t.Destination,
+      '₹' + Number(t.Amount).toLocaleString(),
+      t.Type || '',
+      t.risk + '%',
+      t.flag
+  ]);
+  
+  doc.autoTable({
+      head: [['TxnID', 'Time', 'Source', 'Destination', 'Amount', 'Type', 'Risk', 'Flag']],
+      body: dataForPdf,
+      startY: 28
+  });
+  
+  doc.save('filtered_transactions.pdf');
+});
+
+function init() {
+    // Local storage ko hata diya gaya hai, taaki code har device par chale.
+    // Ab code har baar page load hone par naya data banayega.
+    generateRandomData(); 
+    showTab('tab-overview');
+    applyFilters();
+}
+
+init();
+window.focusOnAccount = focusOnAccount;
+</script>
+</body>
+</html>
+
